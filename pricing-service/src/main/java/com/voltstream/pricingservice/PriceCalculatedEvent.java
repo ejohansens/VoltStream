@@ -4,9 +4,8 @@ import lombok.Data;
 import java.io.Serializable;
 
 @Data
-public class InvoiceReadyEvent implements Serializable {
+public class PriceCalculatedEvent implements Serializable {
     private String sessionId;
     private String userId;
-    private double totalAmount;
-    private String status = "PAID";
+    private double totalEnergyCost;
 }

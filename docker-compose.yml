@@ -1,17 +1,93 @@
+version: '3.8'
+
 services:
+  # -----------------------------------------
+  # MESSAGE BROKER (Shared)
+  # -----------------------------------------
   rabbitmq:
     image: rabbitmq:3-management
     container_name: voltstream-broker
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  postgres:
+  # -----------------------------------------
+  # PRICING DATABASE (Isolated)
+  # -----------------------------------------
+  postgres-pricing:
     image: postgres:15
-    container_name: voltstream-db
+    container_name: db-pricing
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: voltstream_pricing
+      POSTGRES_USER: pricing_user
+      POSTGRES_PASSWORD: pricing_password
+      POSTGRES_DB: pricing_db
     ports:
-      - "5432:5432"
+      - "5432:5432" # Standard Postgres port on your machine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricing_user -d pricing_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------
+  # BILLING DATABASE (Isolated)
+  # -----------------------------------------
+  postgres-billing:
+    image: postgres:15
+    container_name: db-billing
+    environment:
+      POSTGRES_USER: billing_user
+      POSTGRES_PASSWORD: billing_password
+      POSTGRES_DB: billing_db
+    ports:
+      - "5433:5432" # Mapped to 5433 on your machine to avoid conflicts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing_user -d billing_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------
+  # PRICING SERVICE
+  # -----------------------------------------
+  pricing-service:
+    build: ./pricing-service
+    container_name: pricing-service
+    ports:
+      - "8080:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres-pricing:
+        condition: service_healthy
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      # Pointing strictly to its own DB container
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-pricing:5432/pricing_db
+      - SPRING_DATASOURCE_USERNAME=pricing_user
+      - SPRING_DATASOURCE_PASSWORD=pricing_password
+
+  # -----------------------------------------
+  # BILLING SERVICE
+  # -----------------------------------------
+  billing-service:
+    build: ./billing-service
+    container_name: billing-service
+    ports:
+      - "8081:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres-billing:
+        condition: service_healthy
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      # Pointing strictly to its own DB container
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-billing:5432/billing_db
+      - SPRING_DATASOURCE_USERNAME=billing_user
+      - SPRING_DATASOURCE_PASSWORD=billing_password
